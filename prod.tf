@@ -1,8 +1,26 @@
+  variable "whitelist" {
+    type = list(string)
+  }
+  variable "web_image_id" {
+    type = string
+  }
+  variable "web_instance_type" {
+    type = string
+  }
+  variable "web_desired_capacity" {
+    type = number
+  }
+  variable "web_max_size" {
+    type = number
+  }
+  variable "web_min_size" {
+    type = number
+  }
+
 provider "aws" {
     profile = "default"
     region = "eu-central-1"
 }
-
 resource "aws_s3_bucket" "prod_tf_course" {
     bucket = "tf-course-fg-20210128"
     acl = "private"
@@ -24,14 +42,14 @@ resource "aws_default_subnet" "default_az2" {
 }
 
 resource "aws_security_group" "prod_web" {
-  name = "prod_web"
+  name = "prod-web"
   description = "Allow standard http and https ports inbound and everything outbound"
 
   ingress = [ {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.whitelist
     description = "Allow incoming traffic from port 80 from any IP"
     ipv6_cidr_blocks = []
     prefix_list_ids = []
@@ -42,7 +60,7 @@ resource "aws_security_group" "prod_web" {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.whitelist
     description = "Allow incoming traffic from port 443 from any IP"
     ipv6_cidr_blocks = []
     prefix_list_ids = []
@@ -51,7 +69,7 @@ resource "aws_security_group" "prod_web" {
   }]
 
     egress = [ {
-      cidr_blocks = [ "0.0.0.0/0" ]
+      cidr_blocks = var.whitelist
       description = "Everything allowed as outbound traffic"
       from_port = 0
       ipv6_cidr_blocks = []
@@ -67,45 +85,15 @@ resource "aws_security_group" "prod_web" {
   }
 }
 
-resource "aws_instance" "prod_web" {
-  count = 2
-
-  ami           = "ami-0a1273aaf0a904500"
-  instance_type = "t2.nano"
-
-  vpc_security_group_ids = [ aws_security_group.prod_web.id ]
-
-  tags = {
-    "Terraform" = "true"
-  }
+module "web_app" {
+  source           = "./modules/web_app"
+  
+  ami              = var.web_image_id
+  instance_type    = var.web_instance_type
+  desired_capacity = var.web_desired_capacity
+  max_size         = var.web_max_size
+  min_size         = var.web_min_size
+  subnets          = [aws_default_subnet.default_az1.id, aws_default_subnet.default_az2.id]
+  security_groups  = [aws_security_group.prod_web.id]
+  app_name         = "web"
 }
-
-resource "aws_eip_association" "prod_web" {
-  instance_id = aws_instance.prod_web.0.id
-  allocation_id = aws_eip.prod_web.id
-}
-
-resource "aws_eip" "prod_web" {
-  tags = {
-    "Terraform" = "true"
-  }
-}
-
-resource "aws_elb" "prod_web" {
-  name             = "prod-web"
-  instances        = aws_instance.prod_web.*.id
-  subnets          = [ aws_default_subnet.default_az1.id, aws_default_subnet.default_az2.id ]
-  security_groups  = [ aws_security_group.prod_web.id ]
-
-  listener {
-    instance_port     = 80
-    instance_protocol = "http"
-    lb_port           = 80
-    lb_protocol       = "http"
-  }
-
-  tags = {
-    "Terraform" = "true"
-  }
-}
-
